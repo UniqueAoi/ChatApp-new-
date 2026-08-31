@@ -38,12 +38,12 @@ body{
 }
 
 .name > span {
-    color: #bbb;
+    color: #1a0e0e;
 }
 .name-input {
     font-size: 24px;
     font-weight: 700;
-    color: #7e7e7e;
+    color: #686767;
     flex-grow: 1;
     border: none;
     margin: 0px 12px;
@@ -116,7 +116,7 @@ body{
     border: none;
     outline: none;
     padding: 0 12px;
-    background-color: #fff;
+    background-color: #dad3d3;
 }
 
 .send-button {
@@ -125,14 +125,14 @@ body{
     border: none;
     padding: 0px 20px;
     outline: none;
-    background-color: #fff;
+    background-color: #ddd4d4;
     cursor: pointer;
 }
 
 .v-divider{
     height: 48px;
     width: 2px;
-    background-color: #f6f6f6;
+    background-color: #c9c2c2;
 }
 
 .clients-total{
