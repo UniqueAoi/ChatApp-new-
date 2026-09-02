@@ -17,6 +17,7 @@
     <!-- Auth Container -->
     <div id="auth-container" class="auth-card">
         <h2 id="auth-title">Login</h2>
+
         <input type="text" id="auth-username" placeholder="Username">
         <input type="password" id="auth-password" placeholder="Password">
         <button onclick="submitAuth()">Submit</button>
@@ -47,7 +48,7 @@
                     onclick="switchChatContext('all', 'Everyone (Group)')">
                     🌐 Everyone (Group)
                 </div>
-                <h4>Direct Messages</h4>
+                <h4 style="color: rgb(232, 252, 245); font-size: 18px;">Direct Messages</h4>
                 <ul id="user-list-container"></ul>
             </div>
             <div id="client-total">Total Clients: 0</div>

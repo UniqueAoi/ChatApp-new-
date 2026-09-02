@@ -12,6 +12,7 @@ const messageInput = document.getElementById('message-input')
 const clientsTotal = document.getElementById('client-total')
 const messageTone = new Audio('/message-tone.mp3')
 
+
 if (authToken && currentUser) {
     showChatUI()
     initSocket()
