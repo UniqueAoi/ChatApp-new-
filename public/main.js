@@ -1,14 +1,15 @@
 let authToken = localStorage.getItem('token')
 let currentUser = JSON.parse(localStorage.getItem('user')) || null
 let socket = null
+let currentChatTarget = 'all'
+let isLoginMode = true
 
 const authContainer = document.getElementById('auth-container')
 const chatContainer = document.getElementById('chat-main')
-const clientsTotal = document.getElementById('client-total')
 const messageContainer = document.getElementById('message-container')
-const recipientSelect = document.getElementById('recipient-select')
 const messageForm = document.getElementById('message-form')
 const messageInput = document.getElementById('message-input')
+const clientsTotal = document.getElementById('client-total')
 const messageTone = new Audio('/message-tone.mp3')
 
 if (authToken && currentUser) {
@@ -18,7 +19,17 @@ if (authToken && currentUser) {
     showAuthUI()
 }
 
-async function handleAuth(endpoint, username, password) {
+function toggleAuthMode() {
+    isLoginMode = !isLoginMode
+    document.getElementById('auth-title').innerText = isLoginMode ? 'Login' : 'Register'
+    document.getElementById('auth-toggle').innerText = isLoginMode ? 'Need an account? Register' : 'Have an account? Login'
+}
+
+async function submitAuth() {
+    const username = document.getElementById('auth-username').value.trim()
+    const password = document.getElementById('auth-password').value.trim()
+    const endpoint = isLoginMode ? 'login' : 'register'
+
     try {
         const res = await fetch(`/api/${endpoint}`, {
             method: 'POST',
@@ -41,29 +52,11 @@ async function handleAuth(endpoint, username, password) {
 }
 
 function initSocket() {
-    socket = io({
-        auth: { token: authToken }
-    })
+    socket = io({ auth: { token: authToken } })
 
     socket.on('connect', () => {
-        loadChatHistory()
-    })
-
-    socket.on('user-list', (users) => {
-        const currentSelected = recipientSelect.value
-
-        recipientSelect.innerHTML = '<option value="all">Everyone (Group)</option>'
-
-        users.forEach(u => {
-            if (u.userId !== currentUser.id) {
-                const option = document.createElement('option')
-                option.value = u.userId
-                option.textContent = u.username
-                recipientSelect.appendChild(option)
-            }
-        })
-
-        recipientSelect.value = currentSelected || 'all'
+        handleUserSearch()
+        switchChatContext('all', 'Everyone (Group)')
     })
 
     socket.on('clients-total', (count) => {
@@ -71,28 +64,38 @@ function initSocket() {
     })
 
     socket.on('chat-message', (data) => {
-        messageTone.play()
-        addMessageToUI(false, data)
+        if (currentChatTarget === 'all' && data.senderId !== currentUser.id) {
+            messageTone.play()
+            addMessageToUI(false, data)
+        }
     })
 
     socket.on('private-message', (data) => {
-        messageTone.play()
-        addMessageToUI(false, data)
-    })
-
-    socket.on('feedback', (data) => {
-        clearFeedback()
-        if (!data.feedback) return
-        messageContainer.innerHTML += `
-            <li class="message-feedback">
-                <p class="feedback">${data.feedback}</p>
-            </li>`
+        if (currentChatTarget === data.senderId) {
+            messageTone.play()
+            addMessageToUI(false, data)
+        }
     })
 }
 
-async function loadChatHistory() {
+async function switchChatContext(targetId, targetName) {
+    currentChatTarget = targetId
+    document.getElementById('current-chat-title').innerText = targetName
+
+    document.querySelectorAll('.channel-item, .user-item').forEach(el => el.classList.remove('active'))
+    if (targetId === 'all') {
+        document.getElementById('channel-group').classList.add('active')
+    } else {
+        const activeEl = document.getElementById(`user-${targetId}`)
+        if (activeEl) activeEl.classList.add('active')
+    }
+
+    await loadFilteredHistory(targetId)
+}
+
+async function loadFilteredHistory(targetUserId) {
     try {
-        const res = await fetch('/api/messages', {
+        const res = await fetch(`/api/messages/filtered?targetUserId=${targetUserId}`, {
             headers: { 'Authorization': `Bearer ${authToken}` }
         })
         const messages = await res.json()
@@ -111,14 +114,64 @@ async function loadChatHistory() {
     }
 }
 
+// Updated Handle Real-time Search
+async function handleUserSearch() {
+    const searchInput = document.getElementById('user-search-input')
+    if (!searchInput) return
+
+    const query = searchInput.value.trim()
+
+    // Ensure token exists before making request
+    if (!authToken) {
+        authToken = localStorage.getItem('token')
+        if (!authToken) return
+    }
+
+    try {
+        const res = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`, {
+            method: 'GET',
+            headers: { 
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            }
+        })
+
+        if (!res.ok) {
+            console.error('Search request failed with status:', res.status)
+            return
+        }
+
+        const users = await res.json()
+        renderUserList(users)
+    } catch (err) {
+        console.error('Search error:', err)
+    }
+}
+
+function renderUserList(users) {
+    const listContainer = document.getElementById('user-list-container')
+    listContainer.innerHTML = ''
+
+    users.forEach(u => {
+        const avatarSrc = u.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${u.username}`
+        const li = document.createElement('li')
+        li.className = `user-item ${currentChatTarget === u._id ? 'active' : ''}`
+        li.id = `user-${u._id}`
+        li.innerHTML = `
+            <img src="${avatarSrc}" alt="${u.username}">
+            <span>${u.username}</span>
+        `
+        li.onclick = () => switchChatContext(u._id, u.username)
+        listContainer.appendChild(li)
+    })
+}
+
 messageForm.addEventListener('submit', (e) => {
     e.preventDefault()
     const text = messageInput.value.trim()
     if (!text) return
 
-    const selectedRecipient = recipientSelect.value
-
-    if (selectedRecipient === 'all') {
+    if (currentChatTarget === 'all') {
         socket.emit('message', { message: text })
         addMessageToUI(true, {
             sender: currentUser.username,
@@ -128,7 +181,7 @@ messageForm.addEventListener('submit', (e) => {
         })
     } else {
         socket.emit('private-message', {
-            targetUserId: selectedRecipient,
+            targetUserId: currentChatTarget,
             message: text
         })
         addMessageToUI(true, {
@@ -143,24 +196,16 @@ messageForm.addEventListener('submit', (e) => {
 })
 
 function addMessageToUI(isOwnMessage, data) {
-    clearFeedback()
-    const isDM = data.isPrivate ? 'message-dm' : ''
-    const badge = data.isPrivate ? '<span class="dm-badge">DIRECT</span>' : ''
-
     const element = `
-        <li class="${isOwnMessage ? 'message-right' : 'message-left'} ${isDM}">
+        <li class="${isOwnMessage ? 'message-right' : 'message-left'}">
             <p class="message">
-                ${badge}${data.message}
+                ${data.message}
                 <span>${data.sender} • ${moment(data.createdAt).fromNow()}</span>
             </p>
         </li>`
 
     messageContainer.innerHTML += element
     messageContainer.scrollTo(0, messageContainer.scrollHeight)
-}
-
-function clearFeedback() {
-    document.querySelectorAll('li.message-feedback').forEach(el => el.remove())
 }
 
 function showAuthUI() {
@@ -170,8 +215,9 @@ function showAuthUI() {
 
 function showChatUI() {
     authContainer.style.display = 'none'
-    chatContainer.style.display = 'block'
+    chatContainer.style.display = 'flex'
     document.getElementById('logged-username').innerText = currentUser.username
+    document.getElementById('logged-avatar').src = currentUser.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.username}`
 }
 
 function logout() {
