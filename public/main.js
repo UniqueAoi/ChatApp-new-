@@ -12,7 +12,7 @@ const messageInput = document.getElementById('message-input')
 const clientsTotal = document.getElementById('client-total')
 const messageTone = new Audio('/message-tone.mp3')
 
-
+// App Startup Initialization
 if (authToken && currentUser) {
     showChatUI()
     initSocket()
@@ -31,6 +31,8 @@ async function submitAuth() {
     const password = document.getElementById('auth-password').value.trim()
     const endpoint = isLoginMode ? 'login' : 'register'
 
+    if (!username || !password) return alert("Please fill in all fields")
+
     try {
         const res = await fetch(`/api/${endpoint}`, {
             method: 'POST',
@@ -38,7 +40,7 @@ async function submitAuth() {
             body: JSON.stringify({ username, password })
         })
         const data = await res.json()
-        if (!res.ok) throw new Error(data.error)
+        if (!res.ok) throw new Error(data.error || 'Authentication failed')
 
         authToken = data.token
         currentUser = data.user
@@ -53,39 +55,57 @@ async function submitAuth() {
 }
 
 function initSocket() {
+    if (socket) socket.disconnect()
+    
     socket = io({ auth: { token: authToken } })
 
     socket.on('connect', () => {
-        handleUserSearch()
-        switchChatContext('all', 'Everyone (Group)')
+        fetchRecentConversations()
+        
+        // Refresh မလုပ်ခင် နောက်ဆုံးဖွင့်ထားခဲ့တဲ့ Chat (သို့) 'all' ကို ပြန်ယူမည်
+        const savedTargetId = localStorage.getItem('activeChatTargetId') || 'all'
+        const savedTargetName = localStorage.getItem('activeChatTargetName') || 'Everyone (Group)'
+        
+        switchChatContext(savedTargetId, savedTargetName)
     })
 
     socket.on('clients-total', (count) => {
-        clientsTotal.innerText = `Total Clients: ${count}`
+        if (clientsTotal) clientsTotal.innerText = `Total Clients: ${count}`
     })
 
     socket.on('chat-message', (data) => {
-        if (currentChatTarget === 'all' && data.senderId !== currentUser.id) {
-            messageTone.play()
+        const myId = currentUser ? (currentUser.id || currentUser._id) : null
+        if (currentChatTarget === 'all' && data.senderId !== myId) {
+            try { messageTone.play() } catch (e) {}
             addMessageToUI(false, data)
         }
+        fetchRecentConversations()
     })
 
     socket.on('private-message', (data) => {
         if (currentChatTarget === data.senderId) {
-            messageTone.play()
+            try { messageTone.play() } catch (e) {}
             addMessageToUI(false, data)
         }
+        fetchRecentConversations()
     })
 }
 
+
 async function switchChatContext(targetId, targetName) {
     currentChatTarget = targetId
-    document.getElementById('current-chat-title').innerText = targetName
+    
+    // Refresh လုပ်ရင် ပြန်မှတ်မိနေစေရန် localStorage ထဲ သိမ်းထားမည်
+    localStorage.setItem('activeChatTargetId', targetId)
+    localStorage.setItem('activeChatTargetName', targetName)
+
+    const chatTitleEl = document.getElementById('current-chat-title')
+    if (chatTitleEl) chatTitleEl.innerText = targetName
 
     document.querySelectorAll('.channel-item, .user-item').forEach(el => el.classList.remove('active'))
     if (targetId === 'all') {
-        document.getElementById('channel-group').classList.add('active')
+        const groupChannel = document.getElementById('channel-group')
+        if (groupChannel) groupChannel.classList.add('active')
     } else {
         const activeEl = document.getElementById(`user-${targetId}`)
         if (activeEl) activeEl.classList.add('active')
@@ -93,39 +113,57 @@ async function switchChatContext(targetId, targetName) {
 
     await loadFilteredHistory(targetId)
 }
-
 async function loadFilteredHistory(targetUserId) {
     try {
         const res = await fetch(`/api/messages/filtered?targetUserId=${targetUserId}`, {
             headers: { 'Authorization': `Bearer ${authToken}` }
         })
+        if (!res.ok) return
         const messages = await res.json()
         messageContainer.innerHTML = ''
-        messages.forEach(msg => {
-            const isOwn = msg.senderId === currentUser.id
-            addMessageToUI(isOwn, {
-                sender: msg.sender,
-                message: msg.message,
-                createdAt: msg.createdAt,
-                isPrivate: msg.isPrivate
+        
+        if (Array.isArray(messages)) {
+            messages.forEach(msg => {
+                const myId = currentUser ? (currentUser.id || currentUser._id).toString() : ''
+                const senderId = msg.senderId ? msg.senderId.toString() : ''
+                const isOwn = senderId === myId || msg.sender === currentUser.username
+                
+                addMessageToUI(isOwn, {
+                    sender: msg.sender,
+                    message: msg.message,
+                    createdAt: msg.createdAt,
+                    isPrivate: msg.isPrivate
+                })
             })
-        })
+        }
     } catch (err) {
         console.error('Failed to load history:', err)
     }
 }
 
-// Updated Handle Real-time Search
+async function fetchRecentConversations() {
+    if (!authToken) return
+    try {
+        const res = await fetch('/api/conversations/recent', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        })
+        if (!res.ok) return
+        const chattedUsers = await res.json()
+        renderUserList(chattedUsers)
+    } catch (err) {
+        console.error('Error fetching chat history users:', err)
+    }
+}
+
 async function handleUserSearch() {
     const searchInput = document.getElementById('user-search-input')
     if (!searchInput) return
 
     const query = searchInput.value.trim()
 
-    // Ensure token exists before making request
-    if (!authToken) {
-        authToken = localStorage.getItem('token')
-        if (!authToken) return
+    if (!query) {
+        fetchRecentConversations()
+        return
     }
 
     try {
@@ -137,11 +175,7 @@ async function handleUserSearch() {
             }
         })
 
-        if (!res.ok) {
-            console.error('Search request failed with status:', res.status)
-            return
-        }
-
+        if (!res.ok) return
         const users = await res.json()
         renderUserList(users)
     } catch (err) {
@@ -151,18 +185,48 @@ async function handleUserSearch() {
 
 function renderUserList(users) {
     const listContainer = document.getElementById('user-list-container')
+    if (!listContainer) return
     listContainer.innerHTML = ''
 
+    if (!Array.isArray(users) || users.length === 0) {
+        return
+    }
+
+    const currentId = currentUser ? (currentUser.id || currentUser._id || '').toString() : ''
+
     users.forEach(u => {
+        if (!u) return
+        const rawId = u._id || u.id
+        if (!rawId) return
+
+        const targetUserId = rawId.toString()
+        if (targetUserId === currentId) return
+
         const avatarSrc = u.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${u.username}`
+        const lastMsgText = u.lastMessage || ''
+        
+        // Moment.js Safe Formatting
+        let timeFormatted = ''
+        if (u.lastMessageTime) {
+            timeFormatted = typeof moment === 'function' ? moment(u.lastMessageTime).format('HH:mm') : ''
+        }
+
         const li = document.createElement('li')
-        li.className = `user-item ${currentChatTarget === u._id ? 'active' : ''}`
-        li.id = `user-${u._id}`
+        li.className = `user-item ${currentChatTarget === targetUserId ? 'active' : ''}`
+        li.id = `user-${targetUserId}`
         li.innerHTML = `
-            <img src="${avatarSrc}" alt="${u.username}">
-            <span>${u.username}</span>
+            <img src="${avatarSrc}" alt="${u.username}" class="user-avatar">
+            <div class="user-details">
+                <div class="user-row-top">
+                    <span class="user-name">${u.username}</span>
+                    <span class="msg-time">${timeFormatted}</span>
+                </div>
+                <div class="user-row-bottom">
+                    <span class="last-msg-preview">${lastMsgText}</span>
+                </div>
+            </div>
         `
-        li.onclick = () => switchChatContext(u._id, u.username)
+        li.onclick = () => switchChatContext(targetUserId, u.username)
         listContainer.appendChild(li)
     })
 }
@@ -191,17 +255,19 @@ messageForm.addEventListener('submit', (e) => {
             createdAt: new Date(),
             isPrivate: true
         })
+        fetchRecentConversations()
     }
 
     messageInput.value = ''
 })
 
 function addMessageToUI(isOwnMessage, data) {
+    const timeAgo = typeof moment === 'function' ? moment(data.createdAt).fromNow() : ''
     const element = `
         <li class="${isOwnMessage ? 'message-right' : 'message-left'}">
             <p class="message">
                 ${data.message}
-                <span>${data.sender} • ${moment(data.createdAt).fromNow()}</span>
+                <span>${data.sender} • ${timeAgo}</span>
             </p>
         </li>`
 
