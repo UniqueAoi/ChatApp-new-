@@ -31,15 +31,23 @@
             <div class="user-header">
                 <div class="user-info">
                     <img id="logged-avatar" src="" alt="Avatar" class="profile-avatar">
-                    <span id="logged-username"></span>
+                    <div class="profile-copy">
+                        <span class="greeting">Hello,</span>
+                        <span id="logged-username"></span>
+                    </div>
                 </div>
-                <button onclick="logout()" class="logout-btn">Logout</button>
+                <div class="header-actions">
+                    <button type="button" class="icon-btn" aria-label="Focus search" onclick="document.getElementById('user-search-input').focus()">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <button type="button" onclick="logout()" class="logout-btn">Logout</button>
+                </div>
             </div>
 
             <!-- Search Bar -->
             <div class="search-box">
                 <input type="text" id="user-search-input" placeholder="Search registered users..."
-                    onkeyup="handleUserSearch()">
+                    oninput="handleUserSearch()">
             </div>
 
             <!-- Channels & DM Users -->
@@ -48,7 +56,7 @@
                     onclick="switchChatContext('all', 'Everyone (Group)')">
                     🌐 Everyone (Group)
                 </div>
-                <h4 style="color: rgb(232, 252, 245); font-size: 18px;">Direct Messages</h4>
+                <h4 class="direct-messages-title">Direct Messages</h4>
                 <ul id="user-list-container"></ul>
             </div>
             <div id="client-total">Total Clients: 0</div>

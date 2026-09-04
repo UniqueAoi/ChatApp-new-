@@ -7,6 +7,7 @@ const mongoose = require('mongoose')
 const authRoutes = require('./routes/auth')
 const userRoutes = require('./routes/users')
 const messageRoutes = require('./routes/messages')
+const conversationRoutes = require('./routes/conversation.route')
 const setupSocket = require('./sockets/chatSocket')
 
 
@@ -30,6 +31,7 @@ app.use(express.static(path.join(__dirname, 'public')))
 app.use('/api', authRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/messages', messageRoutes)
+app.use('/api/conversations', conversationRoutes)
 
 // Setup Socket.io Event Handling
 setupSocket(io)

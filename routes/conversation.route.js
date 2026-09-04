@@ -1,58 +1,47 @@
 const express = require('express');
 const router = express.Router();
 const Conversation = require('../models/Conversation');
-// Ensure MessageModel and verifyToken are properly imported
-const MessageModel = require('../models/Message'); // Adjust path as needed
-const verifyToken = require('../middleware/auth'); // Adjust path as needed
+const MessageModel = require('../models/Message');
+const User = require('../models/User');
+const verifyToken = require('../middleware/auth');
 // 2. GET /api/conversations/recent -> MUST be defined BEFORE /:userId
 // Express Backend: GET /api/conversations/recent
 router.get('/recent', verifyToken, async (req, res) => {
     try {
         const userId = req.user.id || req.user._id;
 
-        // ၁။ Current User နဲ့ ပတ်သက်ဖူးသမျှ (Private + Group) Message အားလုံးကို ရှာမည်
+        const currentIdStr = userId.toString();
         const messages = await MessageModel.find({
+            isPrivate: true,
             $or: [
-                { sender: userId },
-                { recipient: userId },
-                { isPrivate: false },
-                { recipient: { $exists: false } }
+                { senderId: userId },
+                { recipientId: userId }
             ]
         })
-        .sort({ createdAt: -1 })
-        .populate('sender recipient', '_id username avatar');
+            .sort({ createdAt: -1 });
 
         const chattedUsersMap = new Map();
+        const targetIds = messages
+            .map(msg => msg.senderId.toString() === currentIdStr ? msg.recipientId : msg.senderId)
+            .filter(targetId => targetId && targetId.toString() !== currentIdStr)
+            .map(targetId => targetId.toString());
+        const users = await User.find({ _id: { $in: targetIds } }).select('username _id avatar');
+        const usersById = new Map(users.map(user => [user._id.toString(), user]));
 
         messages.forEach(msg => {
-            if (!msg.sender) return;
+            const targetId = msg.senderId.toString() === currentIdStr ? msg.recipientId : msg.senderId;
+            const targetUser = targetId && usersById.get(targetId.toString());
+            const targetIdStr = targetId && targetId.toString();
 
-            const senderId = msg.sender._id ? msg.sender._id.toString() : msg.sender.toString();
-            const currentIdStr = userId.toString();
-
-            let targetUser = null;
-
-            // သူများက ပို့ထားသော စာဖြစ်ပါက Sender ကို ယူမည် (Group / Private နှစ်မျိုးလုံးအတွက်)
-            if (senderId !== currentIdStr) {
-                targetUser = msg.sender;
-            } 
-            // မိမိကိုယ်တိုင် ပို့ထားသော Private Message ဖြစ်ပါက Recipient ကို ယူမည်
-            else if (msg.recipient && msg.recipient._id && msg.recipient._id.toString() !== currentIdStr) {
-                targetUser = msg.recipient;
-            }
-
-            // Target User ရှိပြီး မိမိမဟုတ်ပါက List ထဲသို့ ထည့်မည်
-            if (targetUser && targetUser._id) {
-                const targetIdStr = targetUser._id.toString();
-                if (targetIdStr !== currentIdStr && !chattedUsersMap.has(targetIdStr)) {
-                    chattedUsersMap.set(targetIdStr, {
-                        _id: targetUser._id,
-                        username: targetUser.username,
-                        avatar: targetUser.avatar,
-                        lastMessage: msg.message || msg.text || '',
-                        lastMessageTime: msg.createdAt
-                    });
-                }
+            if (targetUser && targetIdStr !== currentIdStr && !chattedUsersMap.has(targetIdStr)) {
+                chattedUsersMap.set(targetIdStr, {
+                    _id: targetUser._id,
+                    username: targetUser.username,
+                    avatar: targetUser.avatar,
+                    lastMessage: msg.message || '',
+                    lastMessageTime: msg.createdAt,
+                    isOwnLastMessage: msg.senderId.toString() === currentIdStr
+                });
             }
         });
 

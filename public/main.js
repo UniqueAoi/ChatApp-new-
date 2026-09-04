@@ -3,6 +3,7 @@ let currentUser = JSON.parse(localStorage.getItem('user')) || null
 let socket = null
 let currentChatTarget = 'all'
 let isLoginMode = true
+let searchRequestId = 0
 
 const authContainer = document.getElementById('auth-container')
 const chatContainer = document.getElementById('chat-main')
@@ -160,6 +161,7 @@ async function handleUserSearch() {
     if (!searchInput) return
 
     const query = searchInput.value.trim()
+    const requestId = ++searchRequestId
 
     if (!query) {
         fetchRecentConversations()
@@ -175,9 +177,13 @@ async function handleUserSearch() {
             }
         })
 
-        if (!res.ok) return
+        if (!res.ok) {
+            console.error('Search request failed:', res.status)
+            return
+        }
         const users = await res.json()
-        renderUserList(users)
+        if (requestId !== searchRequestId) return
+        renderUserList(Array.isArray(users) ? users : [])
     } catch (err) {
         console.error('Search error:', err)
     }
@@ -202,8 +208,10 @@ function renderUserList(users) {
         const targetUserId = rawId.toString()
         if (targetUserId === currentId) return
 
-        const avatarSrc = u.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${u.username}`
-        const lastMsgText = u.lastMessage || ''
+        const avatarSrc = u.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(u.username)}`
+        const lastMsgText = u.lastMessage
+            ? `${u.isOwnLastMessage ? 'You: ' : ''}${u.lastMessage}`
+            : ''
         
         // Moment.js Safe Formatting
         let timeFormatted = ''
@@ -226,6 +234,17 @@ function renderUserList(users) {
                 </div>
             </div>
         `
+        const avatar = li.querySelector('.user-avatar')
+        avatar.onerror = () => {
+            const initials = u.username.slice(0, 2).toUpperCase()
+            avatar.src = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+                `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">
+                    <rect width="80" height="80" rx="40" fill="#dce7d2"/>
+                    <text x="40" y="47" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" font-weight="700" fill="#35513a">${initials}</text>
+                </svg>`
+            )}`
+            avatar.onerror = null
+        }
         li.onclick = () => switchChatContext(targetUserId, u.username)
         listContainer.appendChild(li)
     })
